@@ -15,12 +15,12 @@ import shutil
 from torchvision import datasets, transforms
 from torch.autograd import Variable # Useful info about autograd: http://pytorch.org/docs/master/notes/autograd.html
 
-from darknet_multi import Darknet
-from MeshPly import MeshPly
-from utils_multi import *
-from cfg import parse_cfg
-from region_loss_multi import RegionLoss
-import dataset_multi
+from .darknet_multi import Darknet
+from ..MeshPly import MeshPly
+from .utils_multi import *
+from ..cfg import parse_cfg
+from .region_loss_multi import RegionLoss
+from . import dataset_multi
 
 # Adjust learning rate during training, learning schedule can be changed in network config file
 def adjust_learning_rate(optimizer, batch):

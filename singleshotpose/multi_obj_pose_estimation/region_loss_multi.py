@@ -4,7 +4,7 @@ import math
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from utils_multi import *
+from .utils_multi import *
 
 def build_targets(pred_corners, target, num_keypoints, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen):
     nB = target.size(0)
@@ -18,9 +18,9 @@ def build_targets(pred_corners, target, num_keypoints, anchors, num_anchors, num
     tys = list()
     for i in range(num_keypoints):
         txs.append(torch.zeros(nB, nA, nH, nW))
-        tys.append(torch.zeros(nB, nA, nH, nW)) 
+        tys.append(torch.zeros(nB, nA, nH, nW))
     tconf       = torch.zeros(nB, nA, nH, nW)
-    tcls        = torch.zeros(nB, nA, nH, nW) 
+    tcls        = torch.zeros(nB, nA, nH, nW)
 
     num_labels = 2 * num_keypoints + 3 # +2 for width, height and +1 for class within label files
     nAnchors = nA*nH*nW
@@ -61,7 +61,7 @@ def build_targets(pred_corners, target, num_keypoints, anchors, num_anchors, num
                     gi0  = int(gx[i])
                     gj0  = int(gy[i])
             pred_box = pred_corners[b*nAnchors+best_n*nPixels+gj0*nW+gi0]
-            conf = corner_confidence(gt_box, pred_box) 
+            conf = corner_confidence(gt_box, pred_box)
 
             # Decide which anchor to use during prediction
             gw  = target[b][t*num_labels+num_labels-2]*nW
@@ -82,7 +82,7 @@ def build_targets(pred_corners, target, num_keypoints, anchors, num_anchors, num
             # Update targets
             for i in range(num_keypoints):
                 txs[i][b][best_n][gj0][gi0] = gx[i]- gi0
-                tys[i][b][best_n][gj0][gi0] = gy[i]- gj0   
+                tys[i][b][best_n][gj0][gi0] = gy[i]- gj0
             tconf[b][best_n][gj0][gi0]      = conf
             tcls[b][best_n][gj0][gi0]       = target[b][t*num_labels]
 
@@ -90,7 +90,7 @@ def build_targets(pred_corners, target, num_keypoints, anchors, num_anchors, num
                 nCorrect = nCorrect + 1
 
     return nGT, nCorrect, coord_mask, conf_mask, cls_mask, txs, tys, tconf, tcls
-           
+
 class RegionLoss(nn.Module):
     def __init__(self, num_keypoints=9, num_classes=13, anchors=[], num_anchors=5, pretrain_num_epochs=15):
         super(RegionLoss, self).__init__()
@@ -154,7 +154,7 @@ class RegionLoss(nn.Module):
         coord_mask = Variable(coord_mask.cuda())
         conf_mask  = Variable(conf_mask.cuda().sqrt())
         cls_mask   = Variable(cls_mask.view(-1, 1).repeat(1,nC).cuda())
-        cls        = cls[cls_mask].view(-1, nC)  
+        cls        = cls[cls_mask].view(-1, nC)
         t3 = time.time()
 
         # Create loss
@@ -174,7 +174,7 @@ class RegionLoss(nn.Module):
             # pretrain initially without confidence loss
             # once the coordinate predictions get better, start training for confidence as well
             loss  = loss_x + loss_y + loss_cls
-    
+
         print('%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, conf %f, cls %f, total %f' % (self.seen, nGT, nCorrect, nProposals, loss_x.data[0], loss_y.data[0], loss_conf.data[0], loss_cls.data[0], loss.data[0]))
         t4 = time.time()
 

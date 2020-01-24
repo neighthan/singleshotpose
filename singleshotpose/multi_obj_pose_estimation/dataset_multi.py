@@ -8,12 +8,12 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 
-from utils_multi import read_truths_args, read_truths, get_all_files
-from image_multi import *
+from .utils_multi import read_truths_args, read_truths, get_all_files
+from .image_multi import *
 
 class listDataset(Dataset):
 
-    def __init__(self, root, shape=None, shuffle=True, transform=None, objclass=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50): 
+    def __init__(self, root, shape=None, shuffle=True, transform=None, objclass=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50):
        with open(root, 'r') as file:
            self.lines = file.readlines()
        if shuffle:
@@ -53,7 +53,7 @@ class listDataset(Dataset):
             elif self.seen < 80*self.nbatches*self.batch_size:
                width = (random.randint(0,7) + 11)*self.cell_size
                self.shape = (width, width)
-            else: 
+            else:
                width = (random.randint(0,9) + 10)*self.cell_size
                self.shape = (width, width)
 
@@ -61,7 +61,7 @@ class listDataset(Dataset):
             # Decide on how much data augmentation you are going to apply
             jitter = 0.1
             hue = 0.05
-            saturation = 1.5 
+            saturation = 1.5
             exposure = 1.5
 
             # Get background image path
@@ -74,7 +74,7 @@ class listDataset(Dataset):
             img = Image.open(imgpath).convert('RGB')
             if self.shape:
                 img = img.resize(self.shape)
-            
+
             labpath = imgpath.replace('benchvise', self.objclass).replace('images', 'labels_occlusion').replace('JPEGImages', 'labels_occlusion').replace('.jpg', '.txt').replace('.png','.txt')
             num_labels = 2*self.num_keypoints+3 # +2 for ground-truth of width/height , +1 for class label
             label = torch.zeros(self.max_num_gt*num_labels)

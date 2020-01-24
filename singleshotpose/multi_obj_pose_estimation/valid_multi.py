@@ -12,11 +12,11 @@ warnings.filterwarnings("ignore")
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 
-import dataset_multi
-from darknet_multi import Darknet
-import utils_multi as utils
-from cfg import parse_cfg
-from MeshPly import MeshPly
+from . import dataset_multi
+from .darknet_multi import Darknet
+from . import utils_multi as utils
+from ..cfg import parse_cfg
+from ..MeshPly import MeshPly
 
 def valid(datacfg, cfgfile, weightfile):
     def truths_length(truths):
