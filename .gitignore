@@ -1,6 +1,7 @@
-LINEMOD
-VOCdevkit
-backup
-multi_obj_pose_estimation/backup_multi
-cfg/darknet19_448.conv.23
+singleshotpose/LINEMOD
+singleshotpose/VOCdevkit
+singleshotpose/backup
+singleshotpose/multi_obj_pose_estimation/backup_multi
+singleshotpose/cfg/darknet19_448.conv.23
 __pycache__
+*.egg-info

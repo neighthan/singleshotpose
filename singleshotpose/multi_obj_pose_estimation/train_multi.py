@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sys
@@ -18,7 +17,7 @@ from torch.autograd import Variable # Useful info about autograd: http://pytorch
 
 from darknet_multi import Darknet
 from MeshPly import MeshPly
-from utils_multi import *    
+from utils_multi import *
 from cfg import parse_cfg
 from region_loss_multi import RegionLoss
 import dataset_multi
@@ -41,15 +40,15 @@ def adjust_learning_rate(optimizer, batch):
 def train(epoch):
 
     global processed_batches
-    
+
     # Initialize timer
     t0 = time.time()
 
     # Get the dataloader for training dataset
     train_loader = torch.utils.data.DataLoader(dataset_multi.listDataset(trainlist, shape=(init_width, init_height),
                                                             shuffle=True,
-                                                            transform=transforms.Compose([transforms.ToTensor(),]), 
-                                                            train=True, 
+                                                            transform=transforms.Compose([transforms.ToTensor(),]),
+                                                            train=True,
                                                             seen=model.module.seen,
                                                             batch_size=batch_size,
                                                             num_workers=num_workers, bg_file_names=bg_file_names),
@@ -118,14 +117,14 @@ def train(epoch):
             print('           total : %f' % (avg_time[8]/(batch_idx)))
         t1 = time.time()
     t1 = time.time()
-    return epoch * math.ceil(len(train_loader.dataset) / float(batch_size) ) + niter - 1 
+    return epoch * math.ceil(len(train_loader.dataset) / float(batch_size) ) + niter - 1
 
 def eval(niter, datacfg):
     def truths_length(truths):
         for i in range(50):
             if truths[i][1] == 0:
                 return i
-            
+
     # Parse configuration files
     options       = read_data_cfg(datacfg)
     valid_images  = options['valid']
@@ -137,16 +136,16 @@ def eval(niter, datacfg):
     vertices      = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
     corners3D     = get_3D_corners(vertices)
     # Read intrinsic camera parameters
-    internal_calibration = get_camera_intrinsic(u0, v0, fx, fy)        
-    
+    internal_calibration = get_camera_intrinsic(u0, v0, fx, fy)
+
     # Get validation file names
     with open(valid_images) as fp:
         tmp_files = fp.readlines()
         valid_files = [item.rstrip() for item in tmp_files]
-        
+
     # Specify model, load pretrained weights, pass to GPU and set the module in evaluation mode
     model.eval()
-    
+
     # Get the parser for the test dataset
     valid_dataset = dataset_multi.listDataset(valid_images, shape=(model.module.width, model.module.height),
                        shuffle=False,
@@ -159,7 +158,7 @@ def eval(niter, datacfg):
     # Specify the number of workers for multiple processing, get the dataloader for the test dataset
     kwargs = {'num_workers': 4, 'pin_memory': True}
     test_loader = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=valid_batchsize, shuffle=False, **kwargs) 
+        valid_dataset, batch_size=valid_batchsize, shuffle=False, **kwargs)
 
     # Parameters
     num_classes          = model.module.num_classes
@@ -170,27 +169,27 @@ def eval(niter, datacfg):
     errs_2d              = []
 
     logging("   Number of test samples: %d" % len(test_loader.dataset))
-    # Iterate through test examples 
+    # Iterate through test examples
     for batch_idx, (data, target) in enumerate(test_loader):
         t1 = time.time()
-        
+
         # Pass the data to GPU
         if use_cuda:
             data = data.cuda()
             target = target.cuda()
-        
+
         # Wrap tensors in Variable class, set volatile=True for inference mode and to use minimal memory during inference
         data = Variable(data, volatile=True)
         t2 = time.time()
-        
+
         # Formward pass
-        output = model(data).data  
+        output = model(data).data
         t3 = time.time()
-        
+
         # Using confidence threshold, eliminate low-confidence predictions
         trgt = target[0].view(-1, num_labels)
 
-        all_boxes = get_multi_region_boxes(output, conf_thresh, num_classes, num_keypoints, anchors, num_anchors, int(trgt[0][0]), only_objectness=0)    
+        all_boxes = get_multi_region_boxes(output, conf_thresh, num_classes, num_keypoints, anchors, num_anchors, int(trgt[0][0]), only_objectness=0)
         t4 = time.time()
 
         # Iterate through all batch elements
@@ -213,7 +212,7 @@ def eval(niter, datacfg):
                     box_gt.append(truths[k][j])
                 box_gt.extend([1.0, 1.0])
                 box_gt.append(truths[k][0])
-                
+
                 # If the prediction has the highest confidence, choose it as our prediction
                 best_conf_est = -sys.maxsize
                 for j in range(len(boxes)):
@@ -222,11 +221,11 @@ def eval(niter, datacfg):
                         box_pr        = boxes[j]
                         match         = corner_confidence(box_gt[:2*num_keypoints], torch.FloatTensor(boxes[j][:2*num_keypoints]))
 
-                # Denormalize the corner predictions 
+                # Denormalize the corner predictions
                 corners2D_gt = np.array(np.reshape(box_gt[:2*num_keypoints], [num_keypoints, 2]), dtype='float32')
                 corners2D_pr = np.array(np.reshape(box_pr[:2*num_keypoints], [num_keypoints, 2]), dtype='float32')
                 corners2D_gt[:, 0] = corners2D_gt[:, 0] * im_width
-                corners2D_gt[:, 1] = corners2D_gt[:, 1] * im_height               
+                corners2D_gt[:, 1] = corners2D_gt[:, 1] * im_height
                 corners2D_pr[:, 0] = corners2D_pr[:, 0] * im_width
                 corners2D_pr[:, 1] = corners2D_pr[:, 1] * im_height
                 corners2D_gt_corrected = fix_corner_order(corners2D_gt) # Fix the order of the corners in OCCLUSION
@@ -236,14 +235,14 @@ def eval(niter, datacfg):
                 K = np.array(internal_calibration, dtype='float32')
                 R_gt, t_gt = pnp(objpoints3D,  corners2D_gt_corrected, K)
                 R_pr, t_pr = pnp(objpoints3D,  corners2D_pr, K)
-                
+
                 # Compute pixel error
                 Rt_gt           = np.concatenate((R_gt, t_gt), axis=1)
                 Rt_pr           = np.concatenate((R_pr, t_pr), axis=1)
-                proj_2d_gt      = compute_projection(vertices, Rt_gt, internal_calibration) 
-                proj_2d_pred    = compute_projection(vertices, Rt_pr, internal_calibration) 
-                proj_corners_gt = np.transpose(compute_projection(corners3D, Rt_gt, internal_calibration)) 
-                proj_corners_pr = np.transpose(compute_projection(corners3D, Rt_pr, internal_calibration)) 
+                proj_2d_gt      = compute_projection(vertices, Rt_gt, internal_calibration)
+                proj_2d_pred    = compute_projection(vertices, Rt_pr, internal_calibration)
+                proj_corners_gt = np.transpose(compute_projection(corners3D, Rt_gt, internal_calibration))
+                proj_corners_pr = np.transpose(compute_projection(corners3D, Rt_pr, internal_calibration))
                 norm            = np.linalg.norm(proj_2d_gt - proj_2d_pred, axis=0)
                 pixel_dist      = np.mean(norm)
                 errs_2d.append(pixel_dist)
@@ -275,7 +274,7 @@ def eval(niter, datacfg):
     testing_accuracies.append(acc)
 
 def test(niter):
-    
+
     modelcfg = 'cfg/yolo-pose-multi.cfg'
     datacfg = 'cfg/ape_occlusion.data'
     logging("Testing ape...")
@@ -313,11 +312,11 @@ if __name__ == "__main__":
     # Parse data configuration file
     data_options = read_data_cfg(datacfg)
     trainlist    = data_options['train']
-    gpus         = data_options['gpus']  
+    gpus         = data_options['gpus']
     num_workers  = int(data_options['num_workers'])
     backupdir    = data_options['backup']
     im_width     = int(data_options['im_width'])
-    im_height    = int(data_options['im_height']) 
+    im_height    = int(data_options['im_height'])
     fx           = float(data_options['fx'])
     fy           = float(data_options['fy'])
     u0           = float(data_options['u0'])
@@ -361,7 +360,7 @@ if __name__ == "__main__":
     region_loss = RegionLoss(num_keypoints=num_keypoints, num_classes=num_classes, anchors=anchors, num_anchors=num_anchors, pretrain_num_epochs=pretrain_num_epochs)
 
     # Model settings
-    model.load_weights_until_last(initweightfile) 
+    model.load_weights_until_last(initweightfile)
     model.print_network()
     model.seen        = 0
     region_loss.iter  = model.iter
@@ -369,7 +368,7 @@ if __name__ == "__main__":
     processed_batches = model.seen/batch_size
     init_width        = model.width
     init_height       = model.height
-    init_epoch        = model.seen//nsamples 
+    init_epoch        = model.seen//nsamples
 
     # Variables to save
     training_iters       = []
@@ -383,7 +382,7 @@ if __name__ == "__main__":
 
     # Pass the model to GPU
     if use_cuda:
-        # model = model.cuda() 
+        # model = model.cuda()
         model = torch.nn.DataParallel(model, device_ids=[0]).cuda() # Multiple GPU parallelism
 
     # Get the optimizer
@@ -401,11 +400,11 @@ if __name__ == "__main__":
         logging('evaluating ...')
         test(0, 0)
     else:
-        for epoch in range(init_epoch, max_epochs): 
+        for epoch in range(init_epoch, max_epochs):
             # TRAIN
             niter = train(epoch)
             # TEST and SAVE
-            if (epoch % 20 == 0) and (epoch is not 0): 
+            if (epoch % 20 == 0) and (epoch is not 0):
                 test(niter)
                 logging('save training stats to %s/costs.npz' % (backupdir))
                 np.savez(os.path.join(backupdir, "costs.npz"),
@@ -413,9 +412,9 @@ if __name__ == "__main__":
                     training_losses=training_losses,
                     testing_iters=testing_iters,
                     testing_accuracies=testing_accuracies,
-                    testing_errors_pixel=testing_errors_pixel) 
+                    testing_errors_pixel=testing_errors_pixel)
                 if (np.mean(testing_accuracies[-6:]) > best_acc ): # testing for 6 different objects
-                    best_acc = np.mean(testing_accuracies[-6:]) 
+                    best_acc = np.mean(testing_accuracies[-6:])
                     logging('best model so far!')
                     logging('save weights to %s/model.weights' % (backupdir))
                     model.module.save_weights('%s/model.weights' % (backupdir))
