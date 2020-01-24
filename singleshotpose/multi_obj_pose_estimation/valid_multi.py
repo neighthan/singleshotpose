@@ -157,22 +157,3 @@ def valid(datacfg, cfgfile, weightfile):
         acc = len(np.where(np.array(errs_2d) <= px_threshold)[0]) * 100. / (len(errs_2d)+eps)
         # Print test statistics
         utils.logging('   Acc using {} px 2D Projection = {:.2f}%'.format(px_threshold, acc))
-
-if __name__ == '__main__' and __package__ is None:
-
-    parser = argparse.ArgumentParser(description='SingleShotPose')
-    parser.add_argument('--modelcfg', type=str, default='cfg/yolo-pose-multi.cfg') # network config
-    parser.add_argument('--initweightfile', type=str, default='backup_multi/model_backup.weights') # initialization weights
-    args = parser.parse_args()
-    datacfg = 'cfg/ape_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)
-    datacfg = 'cfg/can_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)
-    datacfg = 'cfg/cat_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)
-    datacfg = 'cfg/duck_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)
-    datacfg = 'cfg/glue_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)
-    datacfg = 'cfg/holepuncher_occlusion.data'
-    valid(datacfg, args.modelcfg, args.initweightfile)

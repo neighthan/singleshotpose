@@ -3,6 +3,7 @@
 
 import os
 import random
+from pathlib import Path
 import torch
 import numpy as np
 from PIL import Image
@@ -15,7 +16,10 @@ class listDataset(Dataset):
 
     def __init__(self, root, shape=None, shuffle=True, transform=None, objclass=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50):
        with open(root, 'r') as file:
-           self.lines = file.readlines()
+           # TODO - should just have a kwarg that gives you the directory these paths are relative to
+           rel_dir = Path(__file__).parent
+           self.lines = [str((rel_dir / f).resolve()) for f in file.readlines()]
+
        if shuffle:
            random.shuffle(self.lines)
        self.nSamples         = len(self.lines)

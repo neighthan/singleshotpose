@@ -4,6 +4,7 @@ import time
 import math
 import torch
 import numpy as np
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from torch.autograd import Variable
 import torch.nn.functional as F
@@ -440,6 +441,13 @@ def read_data_cfg(datacfg):
         key = key.strip()
         value = value.strip()
         options[key] = value
+
+    # convert relative paths to absolute paths
+    # it seems like the paths are actually relative to one directory up...
+    data_dir = Path(datacfg).parent / ".."
+    for opt in ["valid", "mesh"]:
+        if opt in options and not options[opt].startswith("/"):
+            options[opt] = str((data_dir / options[opt]).resolve())
     return options
 
 def scale_bboxes(bboxes, width, height):
