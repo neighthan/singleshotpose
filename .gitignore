@@ -3,3 +3,4 @@ VOCdevkit
 backup
 multi_obj_pose_estimation/backup_multi
 cfg/darknet19_448.conv.23
+__pycache__
