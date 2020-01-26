@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys
 import time
 import torch
@@ -13,9 +12,7 @@ import math
 import shutil
 import argparse
 from torchvision import datasets, transforms
-from torch.autograd import (
-    Variable,
-)  # Useful info about autograd: http://pytorch.org/docs/master/notes/autograd.html
+from torch.autograd import Variable
 
 import dataset
 from utils import *
@@ -24,9 +21,6 @@ from region_loss import RegionLoss
 from darknet import Darknet
 from MeshPly import MeshPly
 
-import warnings
-
-warnings.filterwarnings("ignore")
 
 # Create new directory
 def makedirs(path):
@@ -96,8 +90,6 @@ def train(epoch):
         if use_cuda:
             data = data.cuda()
         t3 = time.time()
-        # Wrap tensors in Variable class for automatic differentiation
-        data, target = Variable(data), Variable(target)
         t4 = time.time()
         # Zero the gradients before running the backward pass
         optimizer.zero_grad()
@@ -105,14 +97,14 @@ def train(epoch):
         # Forward pass
         output = model(data)
         t6 = time.time()
-        model.seen = model.seen + data.data.size(0)
-        region_loss.seen = region_loss.seen + data.data.size(0)
+        model.seen = model.seen + data.size(0)
+        region_loss.seen = region_loss.seen + data.size(0)
         # Compute loss, grow an array of losses for saving later on
         loss = region_loss(output, target, epoch)
         training_iters.append(
             epoch * math.ceil(len(train_loader.dataset) / float(batch_size)) + niter
         )
-        training_losses.append(convert2cpu(loss.data))
+        training_losses.append(convert2cpu(loss))
         niter += 1
         t7 = time.time()
         # Backprop: compute gradient of the loss with respect to model parameters
@@ -180,11 +172,9 @@ def test(epoch, niter):
         if use_cuda:
             data = data.cuda()
             target = target.cuda()
-        # Wrap tensors in Variable class, set volatile=True for inference mode and to use minimal memory during inference
-        data = Variable(data, volatile=True)
         t2 = time.time()
-        # Formward pass
-        output = model(data).data
+        with torch.no_grad():
+            output = model(data)
         t3 = time.time()
         # Using confidence threshold, eliminate low-confidence predictions
         all_boxes = get_region_boxes(output, num_classes, num_keypoints)

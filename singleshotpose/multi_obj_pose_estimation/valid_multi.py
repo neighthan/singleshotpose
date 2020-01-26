@@ -1,16 +1,10 @@
-import os
-
-os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import matplotlib.pyplot as plt
 import scipy.misc
 import numpy as np
-import warnings
 import sys
 import time
 import argparse
-
-warnings.filterwarnings("ignore")
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 
@@ -100,7 +94,7 @@ def valid(datacfg, cfgfile, weightfile):
 
         # Forward pass
         with torch.no_grad():
-            output = model(data).data
+            output = model(data)
         t3 = time.time()
 
         # Using confidence threshold, eliminate low-confidence predictions
