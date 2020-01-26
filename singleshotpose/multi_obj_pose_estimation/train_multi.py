@@ -18,14 +18,18 @@ from ..cfg import parse_cfg
 from .region_loss_multi import RegionLoss
 from . import dataset_multi
 from .utils_multi import (
+    compute_projection,
     convert2cpu,
+    corner_confidence,
     file_lines,
+    fix_corner_order,
     get_3D_corners,
     get_all_files,
     get_camera_intrinsic,
     get_multi_region_boxes,
     logging,
     makedirs,
+    pnp,
     read_data_cfg,
 )
 
@@ -192,6 +196,9 @@ def train_loop(
             num_keypoints,
             im_width,
             im_height,
+            testing_iters,
+            testing_errors_pixel,
+            testing_accuracies,
         )
     else:
         for epoch in range(init_epoch, max_epochs):
@@ -242,6 +249,9 @@ def train_loop(
                     num_keypoints,
                     im_width,
                     im_height,
+                    testing_iters,
+                    testing_errors_pixel,
+                    testing_accuracies,
                 )
                 logging("save training stats to %s/costs.npz" % (backupdir))
                 np.savez(
@@ -368,6 +378,9 @@ def eval(
     num_keypoints,
     im_width,
     im_height,
+    testing_iters,
+    testing_errors_pixel,
+    testing_accuracies,
 ):
     def truths_length(truths):
         for i in range(50):
@@ -573,6 +586,9 @@ def test(
     num_keypoints,
     im_width,
     im_height,
+    testing_iters,
+    testing_errors_pixel,
+    testing_accuracies,
 ):
     args = [
         u0,
@@ -586,10 +602,15 @@ def test(
         num_keypoints,
         im_width,
         im_height,
+        testing_iters,
+        testing_errors_pixel,
+        testing_accuracies,
     ]
 
-    modelcfg = "cfg/yolo-pose-multi.cfg"
-    datacfg = "cfg/ape_occlusion.data"
+    rel_dir = Path(__file__).parent
+
+    modelcfg = str((rel_dir / "cfg/yolo-pose-multi.cfg").resolve())
+    datacfg = str((rel_dir / "cfg/ape_occlusion.data").resolve())
     logging("Testing ape...")
     eval(niter, datacfg, *args)
     datacfg = "cfg/can_occlusion.data"
