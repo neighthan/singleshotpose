@@ -92,7 +92,6 @@ def train_loop(
     net_options = parse_cfg(modelcfg)[0]
     loss_options = parse_cfg(modelcfg)[-1]
     batch_size = int(net_options["batch"])
-    max_batches = int(net_options["max_batches"])
     max_epochs = int(net_options["max_epochs"])
     learning_rate = float(net_options["learning_rate"])
     momentum = float(net_options["momentum"])
@@ -180,7 +179,20 @@ def train_loop(
     evaluate = False
     if evaluate:
         logging("evaluating ...")
-        test(0, u0, v0, fx, fy, model, use_cuda, num_labels, conf_thresh, num_keypoints)
+        test(
+            0,
+            u0,
+            v0,
+            fx,
+            fy,
+            model,
+            use_cuda,
+            num_labels,
+            conf_thresh,
+            num_keypoints,
+            im_width,
+            im_height,
+        )
     else:
         for epoch in range(init_epoch, max_epochs):
             train_loader = torch.utils.data.DataLoader(
@@ -228,6 +240,8 @@ def train_loop(
                     num_labels,
                     conf_thresh,
                     num_keypoints,
+                    im_width,
+                    im_height,
                 )
                 logging("save training stats to %s/costs.npz" % (backupdir))
                 np.savez(
@@ -352,6 +366,8 @@ def eval(
     num_labels,
     conf_thresh,
     num_keypoints,
+    im_width,
+    im_height,
 ):
     def truths_length(truths):
         for i in range(50):
@@ -545,97 +561,49 @@ def eval(
 
 
 def test(
-    niter, u0, v0, fx, fy, model, use_cuda, num_labels, conf_thresh, num_keypoints
+    niter,
+    u0,
+    v0,
+    fx,
+    fy,
+    model,
+    use_cuda,
+    num_labels,
+    conf_thresh,
+    num_keypoints,
+    im_width,
+    im_height,
 ):
+    args = [
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+        im_width,
+        im_height,
+    ]
 
     modelcfg = "cfg/yolo-pose-multi.cfg"
     datacfg = "cfg/ape_occlusion.data"
     logging("Testing ape...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
     datacfg = "cfg/can_occlusion.data"
     logging("Testing can...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
     datacfg = "cfg/cat_occlusion.data"
     logging("Testing cat...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
     datacfg = "cfg/duck_occlusion.data"
     logging("Testing duck...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
     datacfg = "cfg/driller_occlusion.data"
     logging("Testing driller...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
     datacfg = "cfg/glue_occlusion.data"
     logging("Testing glue...")
-    eval(
-        niter,
-        datacfg,
-        u0,
-        v0,
-        fx,
-        fy,
-        model,
-        use_cuda,
-        num_labels,
-        conf_thresh,
-        num_keypoints,
-    )
+    eval(niter, datacfg, *args)
