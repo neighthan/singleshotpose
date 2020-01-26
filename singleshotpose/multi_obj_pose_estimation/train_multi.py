@@ -1,32 +1,39 @@
-import os
-
-os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sys
-import argparse
+import os
 import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch.backends.cudnn as cudnn
 import numpy as np
 import random
 import math
 import shutil
+from pathlib import Path
 from torchvision import datasets, transforms
-from torch.autograd import (
-    Variable,
-)  # Useful info about autograd: http://pytorch.org/docs/master/notes/autograd.html
-
+from torch.autograd import Variable
 from .darknet_multi import Darknet
 from ..MeshPly import MeshPly
-from .utils_multi import *
 from ..cfg import parse_cfg
 from .region_loss_multi import RegionLoss
 from . import dataset_multi
+from .utils_multi import (
+    convert2cpu,
+    file_lines,
+    get_3D_corners,
+    get_all_files,
+    get_camera_intrinsic,
+    get_multi_region_boxes,
+    logging,
+    makedirs,
+    read_data_cfg,
+)
 
 # Adjust learning rate during training, learning schedule can be changed in network config file
-def adjust_learning_rate(optimizer, batch):
+def adjust_learning_rate(optimizer, batch, learning_rate, steps, scales, batch_size):
+    """
+    Modifies `optimizer`'s learning rate(s) directly and returns the new lr.
+    """
     lr = learning_rate
     for i in range(len(steps)):
         scale = scales[i] if i < len(scales) else 1
@@ -41,33 +48,226 @@ def adjust_learning_rate(optimizer, batch):
     return lr
 
 
-def train(epoch):
+def train_loop(
+    datacfg: str, modelcfg: str, initweightfile: str, pretrain_num_epochs: int,
+) -> None:
+    # TODO - specify this somewhere
+    rel_dir = Path(__file__).parent.resolve()
 
-    global processed_batches
+    # Parse data configuration file
+    data_options = read_data_cfg(datacfg)
+    path_keys = [
+        "train",
+        "valid1",
+        "valid4",
+        "valid5",
+        "valid6",
+        "valid7",
+        "valid9",
+        "valid10",
+        "backup",
+        "mesh1",
+        "mesh4",
+        "mesh5",
+        "mesh6",
+        "mesh7",
+        "mesh9",
+        "mesh10",
+    ]
+    for key in path_keys:
+        data_options[key] = str((rel_dir / data_options[key]).resolve())
 
-    # Initialize timer
-    t0 = time.time()
+    trainlist = data_options["train"]
+    gpus = data_options["gpus"]
+    num_workers = int(data_options["num_workers"])
+    backupdir = data_options["backup"]
+    im_width = int(data_options["im_width"])
+    im_height = int(data_options["im_height"])
+    fx = float(data_options["fx"])
+    fy = float(data_options["fy"])
+    u0 = float(data_options["u0"])
+    v0 = float(data_options["v0"])
 
-    # Get the dataloader for training dataset
-    train_loader = torch.utils.data.DataLoader(
-        dataset_multi.listDataset(
-            trainlist,
-            shape=(init_width, init_height),
-            shuffle=True,
-            transform=transforms.Compose([transforms.ToTensor(),]),
-            train=True,
-            seen=model.module.seen,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            bg_file_names=bg_file_names,
-        ),
-        batch_size=batch_size,
-        shuffle=False,
-        **kwargs
+    # Parse network and training configuration parameters
+    net_options = parse_cfg(modelcfg)[0]
+    loss_options = parse_cfg(modelcfg)[-1]
+    batch_size = int(net_options["batch"])
+    max_batches = int(net_options["max_batches"])
+    max_epochs = int(net_options["max_epochs"])
+    learning_rate = float(net_options["learning_rate"])
+    momentum = float(net_options["momentum"])
+    decay = float(net_options["decay"])
+    conf_thresh = float(net_options["conf_thresh"])
+    num_keypoints = int(net_options["num_keypoints"])
+    num_classes = int(loss_options["classes"])
+    num_anchors = int(loss_options["num"])
+    steps = [float(step) for step in net_options["steps"].split(",")]
+    scales = [float(scale) for scale in net_options["scales"].split(",")]
+    anchors = [float(anchor) for anchor in loss_options["anchors"].split(",")]
+
+    # Further params
+    if not os.path.exists(backupdir):
+        makedirs(backupdir)
+    bg_dir = (rel_dir / "../VOCdevkit/VOC2012/JPEGImages").resolve()
+    bg_file_names = get_all_files(str(bg_dir))
+    nsamples = file_lines(trainlist)
+    use_cuda = True
+    seed = int(time.time())
+    best_acc = -sys.maxsize
+    num_labels = (
+        num_keypoints * 2 + 3
+    )  # + 2 for image width, height, +1 for image class
+
+    # Specify which gpus to use
+    torch.manual_seed(seed)
+    if use_cuda:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+        torch.cuda.manual_seed(seed)
+
+    # Specifiy the model and the loss
+    model = Darknet(modelcfg)
+    region_loss = RegionLoss(
+        num_keypoints=num_keypoints,
+        num_classes=num_classes,
+        anchors=anchors,
+        num_anchors=num_anchors,
+        pretrain_num_epochs=pretrain_num_epochs,
     )
 
-    # TRAINING
-    lr = adjust_learning_rate(optimizer, processed_batches)
+    # Model settings
+    model.load_weights_until_last(initweightfile)
+    model.print_network()
+    model.seen = 0
+    region_loss.iter = model.iter
+    region_loss.seen = model.seen
+    processed_batches = model.seen / batch_size
+    init_width = model.width
+    init_height = model.height
+    init_epoch = model.seen // nsamples
+
+    # Variables to save
+    training_iters = []
+    training_losses = []
+    testing_iters = []
+    testing_errors_pixel = []
+    testing_accuracies = []
+
+    # Specify the number of workers
+    kwargs = {"num_workers": num_workers, "pin_memory": True} if use_cuda else {}
+
+    # Pass the model to GPU
+    if use_cuda:
+        # TODO - consider using distributed data parallel instead
+        # https://pytorch.org/tutorials/intermediate/ddp_tutorial.html
+        model = torch.nn.DataParallel(model, device_ids=[0]).cuda()
+
+    # Get the optimizer
+    params_dict = dict(model.named_parameters())
+    params = []
+    for key, value in params_dict.items():
+        if key.find(".bn") >= 0 or key.find(".bias") >= 0:
+            params += [{"params": [value], "weight_decay": 0.0}]
+        else:
+            params += [{"params": [value], "weight_decay": decay * batch_size}]
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=learning_rate / batch_size,
+        momentum=momentum,
+        dampening=0,
+        weight_decay=decay * batch_size,
+    )
+
+    evaluate = False
+    if evaluate:
+        logging("evaluating ...")
+        test(0, u0, v0, fx, fy, model, use_cuda, num_labels, conf_thresh, num_keypoints)
+    else:
+        for epoch in range(init_epoch, max_epochs):
+            train_loader = torch.utils.data.DataLoader(
+                dataset_multi.listDataset(
+                    trainlist,
+                    shape=(init_width, init_height),
+                    shuffle=True,
+                    transform=transforms.Compose([transforms.ToTensor(),]),
+                    train=True,
+                    seen=model.module.seen,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    bg_file_names=bg_file_names,
+                ),
+                batch_size=batch_size,
+                shuffle=False,
+                **kwargs,
+            )
+            niter, processed_batches = train_epoch(
+                epoch,
+                train_loader,
+                optimizer,
+                model,
+                learning_rate,
+                steps,
+                scales,
+                batch_size,
+                use_cuda,
+                region_loss,
+                training_iters,
+                training_losses,
+                processed_batches,
+            )
+
+            # TEST and SAVE
+            if (epoch % 20 == 0) and (epoch is not 0):
+                test(
+                    niter,
+                    u0,
+                    v0,
+                    fx,
+                    fy,
+                    model,
+                    use_cuda,
+                    num_labels,
+                    conf_thresh,
+                    num_keypoints,
+                )
+                logging("save training stats to %s/costs.npz" % (backupdir))
+                np.savez(
+                    os.path.join(backupdir, "costs.npz"),
+                    training_iters=training_iters,
+                    training_losses=training_losses,
+                    testing_iters=testing_iters,
+                    testing_accuracies=testing_accuracies,
+                    testing_errors_pixel=testing_errors_pixel,
+                )
+                if (
+                    np.mean(testing_accuracies[-6:]) > best_acc
+                ):  # testing for 6 different objects
+                    best_acc = np.mean(testing_accuracies[-6:])
+                    logging("best model so far!")
+                    logging("save weights to %s/model.weights" % (backupdir))
+                    model.module.save_weights("%s/model.weights" % (backupdir))
+        # shutil.copy2('%s/model.weights' % (backupdir), '%s/model_backup.weights' % (backupdir))
+
+
+def train_epoch(
+    epoch,
+    train_loader,
+    optimizer,
+    model,
+    learning_rate,
+    steps,
+    scales,
+    batch_size,
+    use_cuda,
+    region_loss,
+    training_iters,
+    training_losses,
+    processed_batches,
+):
+    t0 = time.time()
+
+    lr = adjust_learning_rate(
+        optimizer, processed_batches, learning_rate, steps, scales, batch_size
+    )
     logging(
         "epoch %d, processed %d samples, lr %f"
         % (epoch, epoch * len(train_loader.dataset), lr)
@@ -81,14 +281,14 @@ def train(epoch):
     for batch_idx, (data, target) in enumerate(train_loader):
         t2 = time.time()
         # adjust learning rate
-        adjust_learning_rate(optimizer, processed_batches)
+        adjust_learning_rate(
+            optimizer, processed_batches, learning_rate, steps, scales, batch_size
+        )
         processed_batches = processed_batches + 1
         # Pass the data to GPU
         if use_cuda:
             data = data.cuda()
         t3 = time.time()
-        # Wrap tensors in Variable class for automatic differentiation
-        data, target = Variable(data), Variable(target)
         t4 = time.time()
         # Zero the gradients before running the backward pass
         optimizer.zero_grad()
@@ -102,7 +302,7 @@ def train(epoch):
         training_iters.append(
             epoch * math.ceil(len(train_loader.dataset) / float(batch_size)) + niter
         )
-        training_losses.append(convert2cpu(loss.data))
+        training_losses.append(convert2cpu(loss))
         niter += 1
         t7 = time.time()
         # Backprop: compute gradient of the loss with respect to model parameters
@@ -134,10 +334,25 @@ def train(epoch):
             print("           total : %f" % (avg_time[8] / (batch_idx)))
         t1 = time.time()
     t1 = time.time()
-    return epoch * math.ceil(len(train_loader.dataset) / float(batch_size)) + niter - 1
+    return (
+        epoch * math.ceil(len(train_loader.dataset) / float(batch_size)) + niter - 1,
+        processed_batches,
+    )
 
 
-def eval(niter, datacfg):
+def eval(
+    niter,
+    datacfg,
+    u0,
+    v0,
+    fx,
+    fy,
+    model,
+    use_cuda,
+    num_labels,
+    conf_thresh,
+    num_keypoints,
+):
     def truths_length(truths):
         for i in range(50):
             if truths[i][1] == 0:
@@ -201,11 +416,10 @@ def eval(niter, datacfg):
             target = target.cuda()
 
         # Wrap tensors in Variable class, set volatile=True for inference mode and to use minimal memory during inference
-        data = Variable(data, volatile=True)
         t2 = time.time()
 
-        # Formward pass
-        output = model(data).data
+        with torch.no_grad():
+            output = model(data)
         t3 = time.time()
 
         # Using confidence threshold, eliminate low-confidence predictions
@@ -330,178 +544,98 @@ def eval(niter, datacfg):
     testing_accuracies.append(acc)
 
 
-def test(niter):
+def test(
+    niter, u0, v0, fx, fy, model, use_cuda, num_labels, conf_thresh, num_keypoints
+):
 
     modelcfg = "cfg/yolo-pose-multi.cfg"
     datacfg = "cfg/ape_occlusion.data"
     logging("Testing ape...")
-    eval(niter, datacfg)
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+    )
     datacfg = "cfg/can_occlusion.data"
     logging("Testing can...")
-    eval(niter, datacfg)
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+    )
     datacfg = "cfg/cat_occlusion.data"
     logging("Testing cat...")
-    eval(niter, datacfg)
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+    )
     datacfg = "cfg/duck_occlusion.data"
     logging("Testing duck...")
-    eval(niter, datacfg)
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+    )
     datacfg = "cfg/driller_occlusion.data"
     logging("Testing driller...")
-    eval(niter, datacfg)
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
+    )
     datacfg = "cfg/glue_occlusion.data"
     logging("Testing glue...")
-    eval(niter, datacfg)
-
-
-if __name__ == "__main__":
-
-    # Parse command window input
-    parser = argparse.ArgumentParser(description="SingleShotPose")
-    parser.add_argument(
-        "--datacfg", type=str, default="cfg/occlusion.data"
-    )  # data config
-    parser.add_argument(
-        "--modelcfg", type=str, default="cfg/yolo-pose-multi.cfg"
-    )  # network config
-    parser.add_argument(
-        "--initweightfile", type=str, default="backup_multi/init.weights"
-    )  # initialization weights
-    parser.add_argument(
-        "--pretrain_num_epochs", type=int, default=0
-    )  # how many epoch to pretrain
-    args = parser.parse_args()
-    datacfg = args.datacfg
-    modelcfg = args.modelcfg
-    initweightfile = args.initweightfile
-    pretrain_num_epochs = args.pretrain_num_epochs
-
-    # Parse data configuration file
-    data_options = read_data_cfg(datacfg)
-    trainlist = data_options["train"]
-    gpus = data_options["gpus"]
-    num_workers = int(data_options["num_workers"])
-    backupdir = data_options["backup"]
-    im_width = int(data_options["im_width"])
-    im_height = int(data_options["im_height"])
-    fx = float(data_options["fx"])
-    fy = float(data_options["fy"])
-    u0 = float(data_options["u0"])
-    v0 = float(data_options["v0"])
-
-    # Parse network and training configuration parameters
-    net_options = parse_cfg(modelcfg)[0]
-    loss_options = parse_cfg(modelcfg)[-1]
-    batch_size = int(net_options["batch"])
-    max_batches = int(net_options["max_batches"])
-    max_epochs = int(net_options["max_epochs"])
-    learning_rate = float(net_options["learning_rate"])
-    momentum = float(net_options["momentum"])
-    decay = float(net_options["decay"])
-    conf_thresh = float(net_options["conf_thresh"])
-    num_keypoints = int(net_options["num_keypoints"])
-    num_classes = int(loss_options["classes"])
-    num_anchors = int(loss_options["num"])
-    steps = [float(step) for step in net_options["steps"].split(",")]
-    scales = [float(scale) for scale in net_options["scales"].split(",")]
-    anchors = [float(anchor) for anchor in loss_options["anchors"].split(",")]
-
-    # Further params
-    if not os.path.exists(backupdir):
-        makedirs(backupdir)
-    bg_file_names = get_all_files("../VOCdevkit/VOC2012/JPEGImages")
-    nsamples = file_lines(trainlist)
-    use_cuda = True
-    seed = int(time.time())
-    best_acc = -sys.maxsize
-    num_labels = (
-        num_keypoints * 2 + 3
-    )  # + 2 for image width, height, +1 for image class
-
-    # Specify which gpus to use
-    torch.manual_seed(seed)
-    if use_cuda:
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-        torch.cuda.manual_seed(seed)
-
-    # Specifiy the model and the loss
-    model = Darknet(modelcfg)
-    region_loss = RegionLoss(
-        num_keypoints=num_keypoints,
-        num_classes=num_classes,
-        anchors=anchors,
-        num_anchors=num_anchors,
-        pretrain_num_epochs=pretrain_num_epochs,
+    eval(
+        niter,
+        datacfg,
+        u0,
+        v0,
+        fx,
+        fy,
+        model,
+        use_cuda,
+        num_labels,
+        conf_thresh,
+        num_keypoints,
     )
-
-    # Model settings
-    model.load_weights_until_last(initweightfile)
-    model.print_network()
-    model.seen = 0
-    region_loss.iter = model.iter
-    region_loss.seen = model.seen
-    processed_batches = model.seen / batch_size
-    init_width = model.width
-    init_height = model.height
-    init_epoch = model.seen // nsamples
-
-    # Variables to save
-    training_iters = []
-    training_losses = []
-    testing_iters = []
-    testing_errors_pixel = []
-    testing_accuracies = []
-
-    # Specify the number of workers
-    kwargs = {"num_workers": num_workers, "pin_memory": True} if use_cuda else {}
-
-    # Pass the model to GPU
-    if use_cuda:
-        # model = model.cuda()
-        model = torch.nn.DataParallel(
-            model, device_ids=[0]
-        ).cuda()  # Multiple GPU parallelism
-
-    # Get the optimizer
-    params_dict = dict(model.named_parameters())
-    params = []
-    for key, value in params_dict.items():
-        if key.find(".bn") >= 0 or key.find(".bias") >= 0:
-            params += [{"params": [value], "weight_decay": 0.0}]
-        else:
-            params += [{"params": [value], "weight_decay": decay * batch_size}]
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=learning_rate / batch_size,
-        momentum=momentum,
-        dampening=0,
-        weight_decay=decay * batch_size,
-    )
-
-    evaluate = False
-    if evaluate:
-        logging("evaluating ...")
-        test(0, 0)
-    else:
-        for epoch in range(init_epoch, max_epochs):
-            # TRAIN
-            niter = train(epoch)
-            # TEST and SAVE
-            if (epoch % 20 == 0) and (epoch is not 0):
-                test(niter)
-                logging("save training stats to %s/costs.npz" % (backupdir))
-                np.savez(
-                    os.path.join(backupdir, "costs.npz"),
-                    training_iters=training_iters,
-                    training_losses=training_losses,
-                    testing_iters=testing_iters,
-                    testing_accuracies=testing_accuracies,
-                    testing_errors_pixel=testing_errors_pixel,
-                )
-                if (
-                    np.mean(testing_accuracies[-6:]) > best_acc
-                ):  # testing for 6 different objects
-                    best_acc = np.mean(testing_accuracies[-6:])
-                    logging("best model so far!")
-                    logging("save weights to %s/model.weights" % (backupdir))
-                    model.module.save_weights("%s/model.weights" % (backupdir))
-        # shutil.copy2('%s/model.weights' % (backupdir), '%s/model_backup.weights' % (backupdir))
