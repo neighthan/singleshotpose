@@ -22,11 +22,12 @@ class MeshPly:
             for line in open_file_object:
                 elements = line.split()
                 if vertex_mode:
-                    self.vertices.append([float(i) for i in elements[:3]])
-                    self.normals.append([float(i) for i in elements[3:6]])
+                    elements = [float(e) for e in elements]
+                    self.vertices.append(elements[:3])
+                    self.normals.append(elements[3:6])
 
                     if elements[6:9]:
-                        self.colors.append([i / 255.0 for i in elements[6:9]])
+                        self.colors.append([i / 255 for i in elements[6:9]])
                     else:
                         self.colors.append([i / 255.0 for i in color])
 
