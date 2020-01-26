@@ -72,7 +72,7 @@ def train(epoch):
         ),
         batch_size=batch_size,
         shuffle=False,
-        **kwargs
+        **kwargs,
     )
 
     # TRAINING
@@ -452,7 +452,7 @@ if __name__ == "__main__":
         ),
         batch_size=1,
         shuffle=False,
-        **kwargs
+        **kwargs,
     )
 
     # Pass the model to GPU
