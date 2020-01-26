@@ -4,6 +4,7 @@
 import os
 import random
 from pathlib import Path
+from typing import Optional, Union
 import torch
 import numpy as np
 from PIL import Image
@@ -16,7 +17,8 @@ from .image_multi import *
 class listDataset(Dataset):
     def __init__(
         self,
-        root,
+        input_file_list: Union[str, Path],
+        label_file_list: Optional[Union[str, Path]] = None,
         shape=None,
         shuffle=True,
         transform=None,
@@ -31,14 +33,6 @@ class listDataset(Dataset):
         num_keypoints=9,
         max_num_gt=50,
     ):
-        with open(root, "r") as file:
-            # TODO - should just have a kwarg that gives you the directory these paths are relative to
-            rel_dir = Path(__file__).parent
-            self.lines = [str((rel_dir / f).resolve()) for f in file.readlines()]
-
-        if shuffle:
-            random.shuffle(self.lines)
-        self.nSamples = len(self.lines)
         self.transform = transform
         self.target_transform = target_transform
         self.train = train
@@ -49,18 +43,50 @@ class listDataset(Dataset):
         self.bg_file_names = bg_file_names
         self.objclass = objclass
         self.cell_size = cell_size
-        self.nbatches = self.nSamples // self.batch_size
         self.num_keypoints = num_keypoints
-        self.max_num_gt = (
-            max_num_gt  # maximum number of ground-truth labels an image can have
-        )
+        # maximum number of ground-truth labels an image can have
+        self.max_num_gt = max_num_gt
+
+        # TODO - should just have a kwarg that gives you the directory these paths are relative to
+        rel_dir = Path(__file__).parent
+
+        with open(input_file_list) as file:
+            input_paths = [
+                str((rel_dir / f).resolve()).strip() for f in file.readlines()
+            ]
+
+        if label_file_list:
+            with open(label_file_list) as file:
+                label_paths = [
+                    str((rel_dir / f).resolve()).strip() for f in file.readlines()
+                ]
+        else:
+            label_paths = [
+                input_path.replace("benchvise", self.objclass)
+                .replace("images", "labels_occlusion")
+                .replace("JPEGImages", "labels_occlusion")
+                .replace(".jpg", ".txt")
+                .replace(".png", ".txt")
+                for input_path in input_paths
+            ]
+
+        # [(input_path, label_path)]
+        self.paths = list(zip(input_paths, label_paths))
+        self.nSamples = len(self.paths)
+        self.nbatches = self.nSamples // self.batch_size + 1
+
+        if shuffle:
+            random.shuffle(self.paths)
 
     def __len__(self):
         return self.nSamples
 
     def __getitem__(self, index):
-        assert index <= len(self), "index range error"
-        imgpath = self.lines[index].rstrip()
+        if index > len(self):
+            raise IndexError(
+                f"Index {index} is greater than the maximum index of {len(self) - 1}."
+            )
+        imgpath, label_path = self.paths[index]
 
         if self.train and index % self.batch_size == 0:
             if self.seen < 20 * self.nbatches * self.batch_size:
@@ -107,20 +133,12 @@ class listDataset(Dataset):
             if self.shape:
                 img = img.resize(self.shape)
 
-            labpath = (
-                imgpath.replace("benchvise", self.objclass)
-                .replace("images", "labels_occlusion")
-                .replace("JPEGImages", "labels_occlusion")
-                .replace(".jpg", ".txt")
-                .replace(".png", ".txt")
-            )
-            num_labels = (
-                2 * self.num_keypoints + 3
-            )  # +2 for ground-truth of width/height , +1 for class label
+            # +2 for ground-truth of width/height, +1 for class label
+            num_labels = 2 * self.num_keypoints + 3
             label = torch.zeros(self.max_num_gt * num_labels)
-            if os.path.getsize(labpath):
+            if os.path.getsize(label_path):
                 ow, oh = img.size
-                tmp = torch.from_numpy(read_truths_args(labpath))
+                tmp = torch.from_numpy(read_truths_args(label_path))
                 tmp = tmp.view(-1)
                 tsz = tmp.numel()
                 if tsz > self.max_num_gt * num_labels:
