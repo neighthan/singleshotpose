@@ -2,7 +2,6 @@ import time
 import torch
 import math
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
 from .utils_multi import *
 
@@ -181,7 +180,7 @@ class RegionLoss(nn.Module):
                     2, Variable(torch.cuda.LongTensor([2 * i + 1]))
                 ).view(nB, nA, nH, nW)
             )
-        conf = F.sigmoid(
+        conf = torch.sigmoid(
             output.index_select(
                 2, Variable(torch.cuda.LongTensor([2 * self.num_keypoints]))
             ).view(nB, nA, nH, nW)
@@ -256,7 +255,7 @@ class RegionLoss(nn.Module):
             self.seen,
         )
         cls_mask = cls_mask == 1
-        nProposals = int((conf > 0.25).sum().data[0])
+        n_proposals = int((conf > 0.25).sum().item())
         for i in range(self.num_keypoints):
             txs[i] = Variable(txs[i].cuda())
             tys[i] = Variable(tys[i].cuda())
@@ -304,12 +303,12 @@ class RegionLoss(nn.Module):
                 self.seen,
                 nGT,
                 nCorrect,
-                nProposals,
-                loss_x.data[0],
-                loss_y.data[0],
-                loss_conf.data[0],
-                loss_cls.data[0],
-                loss.data[0],
+                n_proposals,
+                loss_x.item(),
+                loss_y.item(),
+                loss_conf.item(),
+                loss_cls.item(),
+                loss.item(),
             )
         )
         t4 = time.time()
