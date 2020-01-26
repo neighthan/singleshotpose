@@ -11,7 +11,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 from .utils_multi import read_truths_args, read_truths, get_all_files
-from .image_multi import *
+from .image_multi import load_data_detection
 
 
 class listDataset(Dataset):
@@ -61,14 +61,19 @@ class listDataset(Dataset):
                     str((rel_dir / f).resolve()).strip() for f in file.readlines()
                 ]
         else:
-            label_paths = [
-                input_path.replace("benchvise", self.objclass)
-                .replace("images", "labels_occlusion")
-                .replace("JPEGImages", "labels_occlusion")
-                .replace(".jpg", ".txt")
-                .replace(".png", ".txt")
-                for input_path in input_paths
-            ]
+            if train:
+                # the actual labels are created in image_multi in a function that does augmentation,
+                # so these "files" aren't used
+                label_paths = [""] * len(input_paths)
+            else:
+                label_paths = [
+                    input_path.replace("benchvise", self.objclass)
+                    .replace("images", "labels_occlusion")
+                    .replace("JPEGImages", "labels_occlusion")
+                    .replace(".jpg", ".txt")
+                    .replace(".png", ".txt")
+                    for input_path in input_paths
+                ]
 
         # [(input_path, label_path)]
         self.paths = list(zip(input_paths, label_paths))
