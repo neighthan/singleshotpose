@@ -1,7 +1,6 @@
-#!/usr/bin/python
-# encoding: utf-8
 import random
 import os
+from pathlib import Path
 from PIL import Image, ImageChops, ImageMath
 import numpy as np
 
@@ -414,11 +413,17 @@ def augment_objects(
         successful = False
         while not successful:
 
-            objpath = "../LINEMOD/" + obj + "/train.txt"
+            objpath = (
+                Path(__file__).parent / ("../LINEMOD/" + obj + "/train.txt")
+            ).resolve()
             with open(objpath, "r") as objfile:
                 objlines = objfile.readlines()
             rand_index = random.randint(0, len(objlines) - 1)
-            obj_rand_img_path = "../" + objlines[rand_index].rstrip()
+            obj_rand_img_path = str(
+                (
+                    Path(__file__).parent / ("../" + objlines[rand_index].rstrip())
+                ).resolve()
+            )
             obj_rand_mask_path = (
                 obj_rand_img_path.replace("JPEGImages", "mask")
                 .replace("/00", "/")
