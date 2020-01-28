@@ -5,13 +5,14 @@ import os
 import random
 from pathlib import Path
 from typing import Optional, Union
-import torch
+
 import numpy as np
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from .utils_multi import read_truths_args, read_truths, get_all_files
 from .image_multi import load_data_detection
+from .utils_multi import read_truths_args
 
 
 class listDataset(Dataset):
@@ -32,6 +33,7 @@ class listDataset(Dataset):
         bg_file_names=None,
         num_keypoints=9,
         max_num_gt=50,
+        ssp=False,
     ):
         self.transform = transform
         self.target_transform = target_transform
@@ -46,6 +48,7 @@ class listDataset(Dataset):
         self.num_keypoints = num_keypoints
         # maximum number of ground-truth labels an image can have
         self.max_num_gt = max_num_gt
+        self.ssp = ssp
 
         # TODO - should just have a kwarg that gives you the directory these paths are relative to
         rel_dir = Path(__file__).parent
@@ -92,6 +95,25 @@ class listDataset(Dataset):
                 f"Index {index} is greater than the maximum index of {len(self) - 1}."
             )
         imgpath, label_path = self.paths[index]
+        if self.ssp:
+            img = Image.open(imgpath).convert("RGB")
+            if self.shape:
+                img = img.resize(self.shape)
+
+            # +2 for ground-truth of width/height, +1 for class label
+            num_labels = 2 * self.num_keypoints + 3
+            label = torch.zeros(self.max_num_gt * num_labels)
+            label_prefix = torch.from_numpy(np.load(label_path))
+            label[: len(label_prefix)] = label_prefix
+
+            if self.transform is not None:
+                img = self.transform(img)
+
+            if self.target_transform is not None:
+                label = self.target_transform(label)
+
+            self.seen = self.seen + self.num_workers
+            return (img, label)
 
         if self.train and index % self.batch_size == 0:
             if self.seen < 20 * self.nbatches * self.batch_size:
