@@ -127,12 +127,13 @@ class RegionLoss(nn.Module):
         anchors=None,
         num_anchors=5,
         pretrain_num_epochs=15,
+        verbose=False,
     ):
         super(RegionLoss, self).__init__()
         self.num_classes = num_classes
         self.anchors = anchors if anchors is not None else []
         self.num_anchors = num_anchors
-        self.anchor_step = len(anchors) / num_anchors
+        self.anchor_step = len(self.anchors) / num_anchors
         self.num_keypoints = num_keypoints
         self.coord_scale = 1
         self.noobject_scale = 1
@@ -141,6 +142,7 @@ class RegionLoss(nn.Module):
         self.thresh = 0.6
         self.seen = 0
         self.pretrain_num_epochs = pretrain_num_epochs
+        self.verbose = verbose
 
     def forward(self, output, target, epoch):  # pylint: disable=arguments-differ
         t0 = time.time()
@@ -297,20 +299,21 @@ class RegionLoss(nn.Module):
             # once the coordinate predictions get better, start training for confidence as well
             loss = loss_x + loss_y + loss_cls
 
-        print(
-            "%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, conf %f, cls %f, total %f"
-            % (
-                self.seen,
-                nGT,
-                nCorrect,
-                n_proposals,
-                loss_x.item(),
-                loss_y.item(),
-                loss_conf.item(),
-                loss_cls.item(),
-                loss.item(),
+        if self.verbose:
+            print(
+                "%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, conf %f, cls %f, total %f"
+                % (
+                    self.seen,
+                    nGT,
+                    nCorrect,
+                    n_proposals,
+                    loss_x.item(),
+                    loss_y.item(),
+                    loss_conf.item(),
+                    loss_cls.item(),
+                    loss.item(),
+                )
             )
-        )
         t4 = time.time()
 
         if False:
