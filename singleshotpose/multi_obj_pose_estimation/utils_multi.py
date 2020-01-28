@@ -176,7 +176,7 @@ def bbox_iou(box1, box2, x1y1x2y2=False):
 
 # Compute confidences of current keypoint predictions
 def corner_confidences(
-    gt_corners, pr_corners, th=80, sharpness=2, im_width=640, im_height=480
+    gt_corners, pr_corners, th=80, sharpness=2.0, im_width=640, im_height=480
 ):
     """ gt_corners: Ground-truth 2D projections of the 3D bounding box corners, shape: (16 x nA), type: torch.FloatTensor
         pr_corners: Prediction for the 2D projections of the 3D bounding box corners, shape: (16 x nA), type: torch.FloatTensor
@@ -194,14 +194,14 @@ def corner_confidences(
     dist[:, :, 0] = dist[:, :, 0] * im_width
     dist[:, :, 1] = dist[:, :, 1] * im_height
 
-    distthresh = torch.FloatTensor([th]).repeat(nA, num_keypoints)
-    dist = torch.sqrt(torch.sum((dist) ** 2, dim=2)).squeeze()  # nA x 9
-    mask = (dist < distthresh).type(torch.FloatTensor)
+    distthresh = torch.tensor([th], device=gt_corners.device).repeat(nA, num_keypoints)
+    dist = torch.sqrt(torch.sum(dist ** 2, dim=2)).squeeze()  # nA x 9
+    mask = (dist < distthresh).float()
     conf = (
         torch.exp(sharpness * (1 - dist / distthresh)) - 1
     )  # mask * (torch.exp(math.log(2) * (1.0 - dist/rrt)) - 1)
-    conf0 = torch.exp(sharpness * (1 - torch.zeros(conf.size(0), 1))) - 1
-    conf = conf / conf0.repeat(1, num_keypoints)
+    conf0 = torch.exp(torch.tensor(sharpness, device=gt_corners.device)) - 1
+    conf = conf / conf0
     # conf = 1 - dist/distthresh
     conf = mask * conf  # nA x 9
     mean_conf = torch.mean(conf, dim=1)
@@ -210,26 +210,26 @@ def corner_confidences(
 
 # Compute confidence of the current keypoint prediction
 def corner_confidence(
-    gt_corners, pr_corners, th=80, sharpness=2, im_width=640, im_height=480
+    gt_corners, pr_corners, th=80, sharpness=2.0, im_width=640, im_height=480
 ):
-    """ gt_corners: Ground-truth 2D projections of the 3D bounding box corners, shape: (18,) type: list
-        pr_corners: Prediction for the 2D projections of the 3D bounding box corners, shape: (18,), type: list
+    """ gt_corners: Ground-truth 2D projections of the 3D bounding box corners, shape: (18,) type: torch.FloatTensor
+        pr_corners: Prediction for the 2D projections of the 3D bounding box corners, shape: (18,), type: torch.FloatTensor
         th        : distance threshold, type: int
         sharpness : sharpness of the exponential that assigns a confidence value to the distance
         -----------
         return    : a list of shape (9,) with 9 confidence values
     """
-    dist = torch.FloatTensor(gt_corners) - pr_corners
+    dist = gt_corners - pr_corners
     num_keypoints = dist.numel() // 2
     dist = dist.view(num_keypoints, 2)
     dist[:, 0] = dist[:, 0] * im_width
     dist[:, 1] = dist[:, 1] * im_height
     eps = 1e-5
-    dist = torch.sqrt(torch.sum((dist) ** 2, dim=1))
-    mask = (dist < th).type(torch.FloatTensor)
+    dist = torch.sqrt(torch.sum(dist ** 2, dim=1))
+    mask = dist < th  # .type(torch.FloatTensor)
     conf = torch.exp(sharpness * (1.0 - dist / th)) - 1
-    conf0 = torch.exp(torch.FloatTensor([sharpness])) - 1 + eps
-    conf = conf / conf0.repeat(num_keypoints, 1)
+    conf0 = torch.exp(torch.tensor(sharpness, device=gt_corners.device)) - 1 + eps
+    conf = conf / conf0
     # conf = 1.0 - dist/th
     conf = mask * conf
     return torch.mean(conf)
