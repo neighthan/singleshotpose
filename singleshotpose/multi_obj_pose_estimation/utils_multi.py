@@ -1,18 +1,16 @@
-import sys
-import os
-import time
+import imghdr
 import math
-import torch
-import numpy as np
+import os
+import struct
+import sys
+import time
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
-from torch.autograd import Variable
-import torch.nn.functional as F
+
 import cv2
+import numpy as np
+import torch
 from scipy import spatial
 
-import struct
-import imghdr
 
 # Create new directory
 def makedirs(path):
@@ -196,7 +194,6 @@ def corner_confidences(
     dist[:, :, 0] = dist[:, :, 0] * im_width
     dist[:, :, 1] = dist[:, :, 1] * im_height
 
-    eps = 1e-5
     distthresh = torch.FloatTensor([th]).repeat(nA, num_keypoints)
     dist = torch.sqrt(torch.sum((dist) ** 2, dim=2)).squeeze()  # nA x 9
     mask = (dist < distthresh).type(torch.FloatTensor)
@@ -256,8 +253,8 @@ def nms(boxes, nms_thresh):
         return boxes
 
     det_confs = torch.zeros(len(boxes))
-    for i in range(len(boxes)):
-        det_confs[i] = 1 - boxes[i][4]
+    for i, box in enumerate(boxes):
+        det_confs[i] = 1 - box[4]
 
     _, sortIds = torch.sort(det_confs)
     out_boxes = []
@@ -311,7 +308,6 @@ def get_multi_region_boxes(
 ):
 
     # Parameters
-    anchor_step = len(anchors) // num_anchors
     if output.dim() == 3:
         output = output.unsqueeze(0)
     batch = output.size(0)
@@ -355,12 +351,10 @@ def get_multi_region_boxes(
         ys.append(output[2 * j + 1] + grid_y)
     det_confs = torch.sigmoid(output[2 * num_keypoints])
     cls_confs = torch.nn.Softmax(dim=1)(
-        Variable(
-            output[
-                2 * num_keypoints + 1 : 2 * num_keypoints + 1 + num_classes
-            ].transpose(0, 1)
+        output[2 * num_keypoints + 1 : 2 * num_keypoints + 1 + num_classes].transpose(
+            0, 1
         )
-    ).data
+    )
     cls_max_confs, cls_max_ids = torch.max(cls_confs, 1)
     cls_max_confs = cls_max_confs.view(-1)
     cls_max_ids = cls_max_ids.view(-1)
@@ -538,11 +532,11 @@ def scale_bboxes(bboxes, width, height):
     import copy
 
     dets = copy.deepcopy(bboxes)
-    for i in range(len(dets)):
-        dets[i][0] = dets[i][0] * width
-        dets[i][1] = dets[i][1] * height
-        dets[i][2] = dets[i][2] * width
-        dets[i][3] = dets[i][3] * height
+    for det in dets:
+        det[0] *= width
+        det[1] *= height
+        det[2] *= width
+        det[3] *= height
     return dets
 
 
@@ -565,14 +559,15 @@ def get_image_size(fname):
         head = fhandle.read(24)
         if len(head) != 24:
             return
-        if imghdr.what(fname) == "png":
+        img_format = imghdr.what(fname)
+        if img_format == "png":
             check = struct.unpack(">i", head[4:8])[0]
             if check != 0x0D0A1A0A:
                 return
             width, height = struct.unpack(">ii", head[16:24])
-        elif imghdr.what(fname) == "gif":
+        elif img_format == "gif":
             width, height = struct.unpack("<HH", head[6:10])
-        elif imghdr.what(fname) == "jpeg" or imghdr.what(fname) == "jpg":
+        elif img_format == "jpeg" or img_format == "jpg":
             try:
                 fhandle.seek(0)  # Read 0xff next
                 size = 2
