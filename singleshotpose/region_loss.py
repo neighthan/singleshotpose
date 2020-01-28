@@ -1,10 +1,9 @@
 import time
+import numpy as np
 import torch
-import math
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-from utils import *
+from . import utils
 
 
 def build_targets(
@@ -22,7 +21,6 @@ def build_targets(
 ):
     nB = target.size(0)
     nA = num_anchors
-    nC = num_classes
     conf_mask = torch.ones(nB, nA, nH, nW) * noobject_scale
     coord_mask = torch.zeros(nB, nA, nH, nW)
     cls_mask = torch.zeros(nB, nA, nH, nW)
@@ -34,9 +32,8 @@ def build_targets(
     tconf = torch.zeros(nB, nA, nH, nW)
     tcls = torch.zeros(nB, nA, nH, nW)
 
-    num_labels = (
-        2 * num_keypoints + 3
-    )  # +2 for width, height and +1 for class within label files
+    # +2 for width, height and +1 for class within label files
+    num_labels = 2 * num_keypoints + 3
     nAnchors = nA * nH * nW
     nPixels = nH * nW
     for b in range(nB):
@@ -50,14 +47,12 @@ def build_targets(
                 g.append(target[b][t * num_labels + 2 * i + 1])
                 g.append(target[b][t * num_labels + 2 * i + 2])
 
-            cur_gt_corners = (
-                torch.FloatTensor(g).repeat(nAnchors, 1).t()
-            )  # 16 x nAnchors
+            # 16 x nAnchors
+            cur_gt_corners = torch.tensor(g).repeat(nAnchors, 1).t()
+            # some irrelevant areas are filtered, in the same grid multiple anchor boxes might exceed the threshold
             cur_confs = torch.max(
-                cur_confs, corner_confidences(cur_pred_corners, cur_gt_corners)
-            ).view_as(
-                conf_mask[b]
-            )  # some irrelevant areas are filtered, in the same grid multiple anchor boxes might exceed the threshold
+                cur_confs, utils.corner_confidences(cur_pred_corners, cur_gt_corners)
+            ).view_as(conf_mask[b])
         conf_mask[b][cur_confs > sil_thresh] = 0
 
     nGT = 0
@@ -86,7 +81,7 @@ def build_targets(
             # Update masks
             best_n = 0  # 1 anchor box
             pred_box = pred_corners[b * nAnchors + best_n * nPixels + gj0 * nW + gi0]
-            conf = corner_confidence(gt_box, pred_box)
+            conf = utils.corner_confidence(gt_box, pred_box)
             coord_mask[b][best_n][gj0][gi0] = 1
             cls_mask[b][best_n][gj0][gi0] = 1
             conf_mask[b][best_n][gj0][gi0] = object_scale
@@ -108,7 +103,7 @@ class RegionLoss(nn.Module):
         self,
         num_keypoints=9,
         num_classes=1,
-        anchors=[],
+        anchors=None,
         num_anchors=1,
         pretrain_num_epochs=15,
     ):
@@ -128,11 +123,9 @@ class RegionLoss(nn.Module):
     def forward(self, output, target, epoch):
         # Parameters
         t0 = time.time()
-        nB = output.data.size(0)
+        nB, _, nH, nW = output.data.shape
         nA = self.num_anchors
         nC = self.num_classes
-        nH = output.data.size(2)
-        nW = output.data.size(3)
         num_keypoints = self.num_keypoints
 
         # Activation
@@ -210,7 +203,7 @@ class RegionLoss(nn.Module):
         gpu_matrix = (
             pred_corners.transpose(0, 1).contiguous().view(-1, 2 * num_keypoints)
         )
-        pred_corners = convert2cpu(gpu_matrix)
+        pred_corners = utils.convert2cpu(gpu_matrix)
         t2 = time.time()
 
         # Build targets
@@ -238,7 +231,7 @@ class RegionLoss(nn.Module):
             self.seen,
         )
         cls_mask = cls_mask == 1
-        nProposals = int((conf > 0.25).sum().data[0])
+        nProposals = int((conf > 0.25).sum().item())
         for i in range(num_keypoints):
             txs[i] = Variable(txs[i].cuda())
             tys[i] = Variable(tys[i].cuda())
@@ -296,10 +289,10 @@ class RegionLoss(nn.Module):
                 nGT,
                 nCorrect,
                 nProposals,
-                loss_x.data[0],
-                loss_y.data[0],
-                loss_conf.data[0],
-                loss.data[0],
+                loss_x.item(),
+                loss_y.item(),
+                loss_conf.item(),
+                loss.item(),
             )
         )
 
