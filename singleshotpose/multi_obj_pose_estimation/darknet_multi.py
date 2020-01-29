@@ -1,52 +1,40 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
+from .. import cfg
 from .region_loss_multi import RegionLoss
-from ..cfg import *
 
 
 class MaxPoolStride1(nn.Module):
-    def __init__(self):
-        super(MaxPoolStride1, self).__init__()
-
-    def forward(self, x):
+    def forward(self, x):  # pylint: disable=arguments-differ
         x = F.max_pool2d(F.pad(x, (0, 1, 0, 1), mode="replicate"), 2, stride=1)
         return x
 
 
 class Reorg(nn.Module):
     def __init__(self, stride=2):
-        super(Reorg, self).__init__()
+        super().__init__()
         self.stride = stride
 
-    def forward(self, x):
+    def forward(self, x):  # pylint: disable=arguments-differ
         stride = self.stride
-        assert x.data.dim() == 4
-        B = x.data.size(0)
-        C = x.data.size(1)
-        H = x.data.size(2)
-        W = x.data.size(3)
+        N, C, H, W = x.shape
         assert H % stride == 0
         assert W % stride == 0
         ws = stride
         hs = stride
-        x = x.view(B, C, H // hs, hs, W // ws, ws).transpose(3, 4).contiguous()
-        x = x.view(B, C, H // hs * W // ws, hs * ws).transpose(2, 3).contiguous()
-        x = x.view(B, C, hs * ws, H // hs, W // ws).transpose(1, 2).contiguous()
-        x = x.view(B, hs * ws * C, H // hs, W // ws)
+        x = x.view(N, C, H // hs, hs, W // ws, ws).transpose(3, 4).contiguous()
+        x = x.view(N, C, H // hs * W // ws, hs * ws).transpose(2, 3).contiguous()
+        x = x.view(N, C, hs * ws, H // hs, W // ws).transpose(1, 2).contiguous()
+        x = x.view(N, hs * ws * C, H // hs, W // ws)
         return x
 
 
 class GlobalAvgPool2d(nn.Module):
-    def __init__(self):
-        super(GlobalAvgPool2d, self).__init__()
-
-    def forward(self, x):
-        N = x.data.size(0)
-        C = x.data.size(1)
-        H = x.data.size(2)
-        W = x.data.size(3)
+    def forward(self, x):  # pylint: disable=arguments-differ
+        N, C, H, W = x.shape
         x = F.avg_pool2d(x, (H, W))
         x = x.view(N, C)
         return x
@@ -54,18 +42,15 @@ class GlobalAvgPool2d(nn.Module):
 
 # for route and shortcut
 class EmptyModule(nn.Module):
-    def __init__(self):
-        super(EmptyModule, self).__init__()
-
-    def forward(self, x):
+    def forward(self, x):  # pylint: disable=arguments-differ
         return x
 
 
 # support route shortcut and reorg
 class Darknet(nn.Module):
     def __init__(self, cfgfile):
-        super(Darknet, self).__init__()
-        self.blocks = parse_cfg(cfgfile)
+        super().__init__()
+        self.blocks = cfg.parse_cfg(cfgfile)
         self.models = self.create_network(self.blocks)  # merge conv, bn,leaky
         self.loss = self.models[len(self.models) - 1]
 
@@ -78,11 +63,11 @@ class Darknet(nn.Module):
             self.anchor_step = self.loss.anchor_step
             self.num_classes = self.loss.num_classes
 
-        self.header = torch.IntTensor([0, 0, 0, 0])
+        self.header = torch.tensor([0, 0, 0, 0], dtype=torch.int32)
         self.seen = 0
         self.iter = 0
 
-    def forward(self, x):
+    def forward(self, x):  # pylint: disable=arguments-differ
         ind = -2
         self.loss = None
         outputs = dict()
@@ -128,11 +113,11 @@ class Darknet(nn.Module):
                 outputs[ind] = x
             elif block["type"] == "region":
                 continue
-                if self.loss:
-                    self.loss = self.loss + self.models[ind](x)
-                else:
-                    self.loss = self.models[ind](x)
-                outputs[ind] = None
+                # if self.loss:
+                #     self.loss = self.loss + self.models[ind](x)
+                # else:
+                #     self.loss = self.models[ind](x)
+                # outputs[ind] = None
             elif block["type"] == "cost":
                 continue
             else:
@@ -140,7 +125,7 @@ class Darknet(nn.Module):
         return x
 
     def print_network(self):
-        print_cfg(self.blocks)
+        cfg.print_cfg(self.blocks)
 
     def create_network(self, blocks):
         models = nn.ModuleList()
@@ -288,15 +273,15 @@ class Darknet(nn.Module):
                 model = self.models[ind]
                 batch_normalize = int(block["batch_normalize"])
                 if batch_normalize:
-                    start = load_conv_bn(buf, start, model[0], model[1])
+                    start = cfg.load_conv_bn(buf, start, model[0], model[1])
                 else:
-                    start = load_conv(buf, start, model[0])
+                    start = cfg.load_conv(buf, start, model[0])
             elif block["type"] == "connected":
                 model = self.models[ind]
                 if block["activation"] != "linear":
-                    start = load_fc(buf, start, model[0])
+                    start = cfg.load_fc(buf, start, model[0])
                 else:
-                    start = load_fc(buf, start, model)
+                    start = cfg.load_fc(buf, start, model)
             elif block["type"] == "maxpool":
                 pass
             elif block["type"] == "reorg":
@@ -338,15 +323,15 @@ class Darknet(nn.Module):
                 model = self.models[ind]
                 batch_normalize = int(block["batch_normalize"])
                 if batch_normalize:
-                    start = load_conv_bn(buf, start, model[0], model[1])
+                    start = cfg.load_conv_bn(buf, start, model[0], model[1])
                 else:
-                    start = load_conv(buf, start, model[0])
+                    start = cfg.load_conv(buf, start, model[0])
             elif block["type"] == "connected":
                 model = self.models[ind]
                 if block["activation"] != "linear":
-                    start = load_fc(buf, start, model[0])
+                    start = cfg.load_fc(buf, start, model[0])
                 else:
-                    start = load_fc(buf, start, model)
+                    start = cfg.load_fc(buf, start, model)
             elif block["type"] == "maxpool":
                 pass
             elif block["type"] == "reorg":
@@ -375,6 +360,17 @@ class Darknet(nn.Module):
         header = self.header
         header.numpy().tofile(fp)
 
+        no_param_blocks = {
+            "maxpool",
+            "reorg",
+            "route",
+            "shortcut",
+            "region",
+            "avgpool",
+            "softmax",
+            "cost",
+        }
+
         ind = -1
         for blockId in range(1, cutoff + 1):
             ind = ind + 1
@@ -383,31 +379,17 @@ class Darknet(nn.Module):
                 model = self.models[ind]
                 batch_normalize = int(block["batch_normalize"])
                 if batch_normalize:
-                    save_conv_bn(fp, model[0], model[1])
+                    cfg.save_conv_bn(fp, model[0], model[1])
                 else:
-                    save_conv(fp, model[0])
+                    cfg.save_conv(fp, model[0])
             elif block["type"] == "connected":
                 model = self.models[ind]
                 if block["activation"] != "linear":
-                    save_fc(fc, model)
+                    cfg.save_fc(fp, model)
                 else:
-                    save_fc(fc, model[0])
-            elif block["type"] == "maxpool":
-                pass
-            elif block["type"] == "reorg":
-                pass
-            elif block["type"] == "route":
-                pass
-            elif block["type"] == "shortcut":
-                pass
-            elif block["type"] == "region":
-                pass
-            elif block["type"] == "avgpool":
-                pass
-            elif block["type"] == "softmax":
-                pass
-            elif block["type"] == "cost":
-                pass
+                    cfg.save_fc(fp, model[0])
+            elif block["type"] in no_param_blocks:
+                continue
             else:
                 print("unknown type %s" % (block["type"]))
         fp.close()
