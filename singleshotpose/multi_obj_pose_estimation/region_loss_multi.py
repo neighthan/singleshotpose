@@ -297,7 +297,7 @@ class RegionLoss(nn.Module):
             loss = loss_x + loss_y + loss_cls
 
         if self.logger:
-            logger.log(
+            self.logger.log(
                 {
                     "n_seen": self.seen,
                     "n_ground_truth": nGT,
